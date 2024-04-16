@@ -1,0 +1,212 @@
+ИМЕНА ВСЕМ
+
+hostnamectl set-hostname HQ-SRV
+hostnamectl set-hostname HQ-R
+hostnamectl set-hostname ISP
+hosntamectl set-hostname BR-R
+hostnamectl set-hostname BR-SRV
+hostnamectl set-hostname CLI
+
+ВЫСЧИТАТЬ И РАЗДАТЬ IP ЧЕРЕЗ NMTUI
+
+НА РОУТЕРАХ HQ-R ISB BR-R
+
+echo "net.ipv4.ip_forward=1">> /etc/sysctl.conf
+sysctl -p
+
+НА ВСЕХ
+
+nano /etc/sysconfig/selinux
+SELINUX=permissive
+reboot
+
+СОЗДАТЬ IP TUNNEL НА HQ-R И BR-R
+
+НА HQ-R BR-R
+
+nmcli connection modify gre1 ip-tunnel.ttl 64
+
+ПОЧТИ НА ВСЕХ ДОБАВИТЬ ПАКЕТЫ И МОНТИРОВАТЬ
+
+mount /dev/cdrom /mnt
+
+FRR НА HQ-R И BR-R
+
+cd /mnt/frr
+rpm -i --force *
+
+systemctl enable --now frr
+systmectl status frr
+nano /etc/frr/daemons
+ospfd=yes
+systemctl restart frr
+vtysh
+conf t
+router ospf
+network [ip]/mask area 0
+network [ip]/mask area 0
+do wr
+exit
+
+DHCP НА HQ-R
+cd /mnt/dhcp
+rpm -i --force *
+nano /etc/dhcp/dhcpd.conf
+subnet 192.168.100.0 netmask 255.255.255.192 {
+range 192.168.100.2 192.168.100.62;
+option domain-name-servers 192.168.100.10;
+option routers 192.168.100.1;
+default-lease-time 600;
+max-lease-time 7200;
+}
+systemctl enable --now dhcpd
+systemctl status dhcpd
+nano /etc/dhcp/dhcpd.conf
+host hq-srv {
+hardware ethernet 00:0C:29:22:11:40;
+fixed-address 192.168.100.10;
+}
+
+настроить учетные записи по таблице изи
+
+useradd Admin
+passwd Admin
+P@ssw0rd
+P@ssw0rd
+
+IPERF НА HQ-R И ISP
+cd /mnt/iperf
+rpm -i --force *
+НА ISP
+iperf3 -s
+НА HQ-R
+iperf3 -c 1.1.1.1
+
+BACKUP НА HQ-R И BR-R
+cd nano backup.sh
+HQ-R->
+#!/bin/bash
+SAVE="user@192.168.100.10:/home/user"
+BACKUP="/root/backup-hq-r.tar.gz"
+sudo tar cvpzf $BACKUP --exclude=/proc --exclude=$BACKUP /
+scp $BACKUP $SAVE
+BR-R->
+#!/bin/bash
+SAVE="user@172.16.100.0:/home/user"
+BACKUP="/root/backup-br-r.tar.gz"
+sudo tar cvpzf $BACKUP --exclude=/proc --exclude=$BACKUP /
+scp $BACKUP $SAVE
+chmod +x backup.sh
+./backup.sh
+ПРОВЕРКА 
+cd /home/user
+ls
+
+NTP НА HQ-R
+nano /etc/chrony.conf
+
+server 123.123.123.123
+allow 192.168.100.0/26
+allow 172.16.100.0/28
+allow 20.20.20.0/24
+allow 1.1.1.0/30
+
+local stratum 5
+
+СОЗДАНИУ LOOPBACK ИНТЕРФЕЙСА HQ-R
+
+nmcli conn add type dummy connection.interface-name Lo1
+nmcli conn edit dummy-Lo1
+set connection.id Lo1
+set connection.interface-name Lo1
+set connection.autoconnect yes
+set ipv4.method manual
+set ipv4.addresses 123.123.123.123/32
+save
+quit
+systemctl restart chronyd
+
+ISP
+nano /etc/chrony.conf
+server 192.168.100.1 iburst
+
+CLI
+server 20.20.20.1 iburst
+
+НА ОСТАЛЬНЫХ
+server 192.168.100.1 iburst
+systemctl restart chronyd
+
+НА ВСЕХ
+timedatectl set-timezone Europe/Moscow
+
+СЕРВЕР ДОМЕНА НА HQ-SRV
+cd /mnt/freeipa-server
+rpm -i --force *
+rpm -e java-11-openjdk-headless --nodeps
+hostnamectl set-hostname hq-srv.demo.wor
+ipa-server-install --mkhomedir ->
+yes
+enter x3
+P@ssw0rd x4
+no
+yes
+enter
+no
+yes
+
+kinit admin
+ipa user-find admin
+ipa config-mod --defaultshell=/usr/bin/bash
+iptables -F
+systemctl enable --now iptables
+iptables-save> /etc/sysconfig/iptables
+
+BR-SRV
+cd /mnt/freeipa-client
+rpm -i --force * --nodeps
+hostnamectl set-hostname br-srv.demo.work
+
+CLI
+hostnamectl set-hostname cli.demo.work
+
+через nmtui задать днс сервер 
+192.168.100.10
+
+ipa-client-install --mkhomedir --enable-dns-updates ->
+no
+yes
+admin
+P@ssw0rd
+
+ЗАЙТИ НА ВЕБ ИНТЕРФЕС С HQ-SRV ПО АДРЕСУ
+hq-srv.demo.work
+
+Переходим во вкладку Узлы и проверяем:
+Настройте DNS-сервер на сервере HQ-SRV:
+a. На DNS сервере необходимо настроить 2 зоны
+Зона hq.work, также не забудьте настроить обратную зону.
+
+Зона branch.work
+
+Для создания DNS-сервера воспользуемся интегрированной
+службой DNS в FreeIPA.
+1. Для этого переходим во вкладку Сетевые службы > DNS > Зоны DNS
+2. Добавляем прямые и обратные зоны:
+Получаем следующее:
+
+Заходим в настройки зоны hq.work и добавляем A записи,
+одновременно создавая PTR
+
+Заходим в настройки зоны branch.work и добавляем A записи,
+одновременно создавая PTR
+После поднятия DNS необходимо на всех серверах указать DNSсервер 192.168.100.10, по аналогии с BR-SRV: 
+
+
+САМЫЙ КОНЕЦ НАСТРОИТЬ SSH HQ-SRV
+iptables -t nat -A PREROUTING -p tcp --dport 2222 -j REDIRECT --to-port 22
+systemctl enable --now iptables
+iptables-save> /etc/sysconfig/iptables
+iptables -A INPUT -s 20.20.20.20 -p tcp --dport 22 -j DROP
+iptables-save> /etc/sysconfig/iptables
+
