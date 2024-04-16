@@ -1,0 +1,246 @@
+
+Имя устройства 	IP 
+CLI 	3.3.3.2/30
+20.20.20.20/24
+ISP 	1.1.1.1/30
+2.2.2.1/30
+3.3.3.1/30
+HQ-R 	192.168.100.1/26
+1.1.1.2/30
+20.20.20.1/24
+HQ-SRV 	192.168.100.10/26
+
+BR-R 	172.16.100.1/28
+2.2.2.2/30
+BR-SRV 	172.16.100.10/28
+HQ-SRV:
+ 
+HQ-R:
+ 
+ISP:
+ 
+BR-R:
+ 
+ 
+BR-SRV:
+ 
+CLI:
+ 
+1. Также в маршрутизации на CLI добавить маршрут:
+ 
+a. Необходимо включить маршрутизацию пакетов на роутерах HQ-R, ISP, BR-R:
+echo “net.ipv4.ip_forward = 1” >> /etc/sysctl.conf
+sysctl -p
+nano /etc/sysconfig/selinux
+
+reboot
+
+
+
+
+HQ-R: 
+ 
+BR-R:
+ 
+HQ-R и BR-R:
+nmcli connection modify gre1 ip-tunnel.ttl 64
+HQ-R:
+1. Перед установкой выполняем монтирование диска Packets на уровне ВМ:
+mount /dev/cdrom /mnt
+cd /mnt/frr
+rpm -i --force *
+systemctl enable --now frr
+systemctl status frr
+nano /etc/frr/daemons 
+ 
+systemctl restart frr
+vtysh
+conf t
+router ospf
+network 192.168.100.0/26 area 0
+network 10.10.10.0/30 area 0
+do wr
+exit
+BR-R: 
+cd /mnt/frr
+rpm -i --force * 
+systemctl enable --now frr
+systemctl status frr 
+nano /etc/frr/daemons 
+systemctl restart frr 
+vtysh
+conf t
+router ospf
+network 172.16.100.0/28 area 0
+network 10.10.10.0/30 area 0
+do wr
+exit 
+ 
+b. HQ-R:
+cd /mnt/dhcp
+rpm -i --force * 
+nano /etc/dhcp/dhcpd.conf 
+ 
+ 
+ 
+systemctl enable --now dhcpd
+systemctl status dhcpd 
+
+ 
+1. На CLI, HQ-SRV, HQ-R:
+useradd Admin
+passwd Admin 
+2. На BR-SRV, BR-R:
+useradd Branch_admin
+passwd Branch_admin 
+3. На HQ-R, BR-R, BR-SRV:
+useradd Network_admin
+passwd Network_admin 
+cd /mnt/iperf
+rpm -i --force *
+1. На ISP:
+iperf3 -s
+2. На HQ-R:
+iperf 3 -c 1.1.1.1
+В качестве отчёта предоставляем скрин после тестирования.
+ 
+HQ-R и BR-R: 
+nano backup.sh
+HQ-R:
+ 
+BR-R:
+ 
+chmod +x backup.sh
+./backup.sh 
+cd /home/user/
+ls 
+  
+HQ-SRV:
+iptables -t nat -A PREROUTING -p tcp --dport 2222 -j REDIRECT --to-port 22 
+systemctl enable --now iptables 
+iptables-save > /etc/sysconfig/iptables
+HQ-SRV:
+iptables -A INPUT -s 20.20.20.20 -p tcp --dport 22 -j DROP 
+iptables-save > /etc/sysconfig/iptables
+
+
+
+nano /etc/chrony.conf 
+ 
+nmcli conn add type dummy connection.interface-name Lo1
+nmcli conn edit dummy-Lo1
+set connection.id Lo1
+set connection.interface-name Lo1
+set connection.autoconnect yes
+set ipv4.method manual
+set ipv4.address x.x.x.x/x
+save
+quit 
+1. Проверяем созданный loopback:
+ip a 
+ 
+systemctl restart chronyd 
+На всех устройствах кроме CLI:
+nano /etc/chrony.conf 
+ 
+2. На CLI:
+ 
+systemctl restart chronyd 
+1. На всех устройствах:
+timedatectl set-timezone Europe/Moscow 
+1. HQ-SRV:
+cd /mnt/freeipa-server
+rpm -i --force *
+rpm -e java-11-openjdk-headless --nodeps 
+hostnamectl set-hostname hq-srv.demo.work
+ipa-server-install –mkhomedir
+2. Соглашаемся на интегрированную службу DNS:
+ 
+3. Соглашаемся со следующими параметрами (Enter):
+4. Имя сервера:
+ 
+5. Доменное имя:
+ 
+6. Realm name:
+ 
+7. Указываем пароль P@ssw0rd для Directory Manager:
+ 
+8. Указываем пароль P@ssw0rd для IPA Admin:
+ 
+9. Не соглашаемся с настройкой DNS forwarders
+ 
+10. Соглашаемся с настройкой обратной зоны:
+ 
+11. NetBIOS domain name:
+ 
+12. Отказываемся от настройки NTP:
+ 
+kinit admin
+ipa user-find admin 
+ipa config-mod --defaultshell=/usr/bin/bash
+
+
+
+a. Введите машины BR-SRV и CLI в данный домен:
+1. Устанавливаем пакеты FreeIPA на BR-SRV:
+cd /mnt/freeipa-client
+rpm -i --force * --nodeps
+2. Задаём BR-SRV и CLI hostname:
+hostnamectl set-hostname br-srv.demo.work
+hostnamectl set-hostname CLI.demo.work 
+3. Через nmtui задаём DNS-сервер:
+ 
+4. Вводим в домен:
+ipa-client-install --mkhomedir --enable-dns-updates
+ 
+ 
+5. Вводим учетные записи администратора:
+admin
+P@ssw0rd 
+ 
+6. Успешный ввод выглядит так:
+ 
+ 
+1. HQ-SRV по адресу: hq-srv.demo.work:
+ 
+Имя пользователя - admin 
+Пароль - P@ssw0rd 
+2. Переходим во вкладку Узлы и проверяем:
+ 
+b. На DNS сервере HQ-SRV необходимо настроить 2 зоны:
+1. Зона hq.work, также не забудьте настроить обратную зону:
+ 
+2. Зона branch.work:
+ 
+ 
+1. Для этого переходим во вкладку Сетевые службы > DNS > Зоны DNS:
+ 
+2. Добавляем прямые и обратные зоны:
+ 
+3. Получаем следующее:
+ 
+4. Заходим в настройки зоны hq.work и добавляем A записи, одновременно создавая PTR:
+ 
+ 
+ 
+5. Заходим в настройки зоны branch.work и добавляем A записи, одновременно создавая PTR:
+ 
+На HQ-SRV: 
+1. Запускаем службу и добавляем в автозагрузку:
+systemctl enable nfs-server.service --now 
+2. Создаём общие папки:
+mkdir -p /nfs/Branch_Files
+mkdir -p /nfs/Network
+mkdir -p /nfs/Admin_Files 
+3. Передаём папки пользователем:
+chown -R admin:admin /nfs/Admin_Files/
+chown -R branch_admin:branch_admin /nfs/Branch_Files/
+chown -R network_admin:network_admin /nfs/Network/
+4. Открываем настройки nfs-сервера и прописываем настройки:
+nano /etc/exports 
+/nfs/Branch_Files *(rw,sync)
+/nfs/Network *(rw,sync)
+/nfs/Admin_Files *(rw,sync)
+  
+5. Применяем настройки:
+exportfs -ra 
