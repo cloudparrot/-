@@ -1,0 +1,128 @@
+Примечание. IPTables лучше настаивать в самом конце, так как при
+установке FreeIPA устанавливает свои правила, которые необходимо сбросить.
+Настройте подключение по SSH для удалённого конфигурирования
+устройства HQ-SRV по порту 2222. Учтите, что вам необходимо
+перенаправить трафик на этот порт по средствам контролирования
+трафика.
+HQ-SRV:
+1. Настраиваем систему контролирования трафика для
+перенаправления трафика.
+iptables -t nat -A PREROUTING -p tcp --dport 2222 -j REDIRECT --to-port 22
+2. Включаем iptables-services для работы правил после перезагрузки:
+systemctl enable --now iptables
+3. Сохраняем текущую конфигурацию
+iptables-save > /etc/sysconfig/iptables
+Настройте контроль доступа до HQ-SRV по SSH со всех устройств,
+кроме CLI.
+HQ-SRV:
+1. Настраиваем систему контролирования трафика для
+перенаправления трафика.
+iptables -A INPUT -s 20.20.20.20 -p tcp --dport 22 -j DROP
+2. Сохраняем текущую конфигурацию
+iptables-save > /etc/sysconfig/iptables
+Задание модуля 2
+Настройте синхронизацию времени между сетевыми устройствами
+по протоколу NTP.
+a. В качестве сервера должен выступать роутер HQ-R со стратумом 5
+По умолчанию chrony установлен. Сразу начинаем с его настройки.
+1. Изменяем конфигурационный файл.
+nano /etc/chrony.conf
+b. Используйте Loopback интерфейс на HQ-R, как источник сервера
+времени
+1. Создаём loopback интерфейс
+nmcli conn add type dummy connection.interface-name Lo1
+nmcli conn edit dummy-Lo1
+set connection.id Lo1
+set connection.interface-name Lo1
+set connection.autoconnect yes
+set ipv4.method manual
+set ipv4.addresses 123.123.123.123/32
+save
+quit
+2. Проверяем созданный loopback
+ip a
+3. Перезапускаем сервис.
+systemctl restart chronyd
+c. Все остальные устройства и сервера должны синхронизировать
+свое время с роутером HQ-R
+1. На всех устройствах кроме ISP и CLI
+nano /etc/chrony.conf
+На ISP
+На CLI
+2. Перезапускаем сервис
+systemctl restart chronyd
+d. Все устройства и сервера настроены на московский часовой пояс
+(UTC +3)
+1. На всех устройствах
+timedatectl set-timezone Europe/Moscow
+Настройте сервер домена выбор, его типа обоснуйте, на базе HQ-SRV
+через web интерфейс, выбор технологий обоснуйте.
+b. Организуйте отслеживание подключения к домену
+1. Устанавливаем пакеты FreeIPA на HQ-SRV
+cd /mnt/freeipa-server
+rpm -i --force *
+Удаляем java 11
+rpm -e java-11-openjdk-headless --nodeps
+2. Задаём HQ-SRV hostname:
+hostnamectl set-hostname hq-srv.demo.work
+2. Начинаем установку FreeIPA домена на HQ-SRV
+ipa-server-install --mkhomedir
+Соглашаемся на интегрированную службу DNS
+Соглашаемся со следующими параметрами (Enter):
+Имя сервера:
+Доменное имя:
+Realm name:
+Указываем пароль P@ssw0rd для Directory Manager:
+Указываем пароль P@ssw0rd для IPA Admin:
+Не соглашаемся с настройкой DNS forwarders
+Соглашаемся с настройкой обратной зоны:
+NetBIOS domain name:
+Отказываемся от настройки NTP:
+Проверяем заданные параметры и соглашаемся на установку:
+3. После установки убедитесь, что сервер IPA работает:
+kinit admin
+ipa user-find admin
+4. Устанавливаем оболочку по умолчанию для пользователей:
+ipa config-mod --defaultshell=/usr/bin/bash
+5. Удаляем правила iptables
+iptables -F
+6. Включаем iptables-services для работы правил после перезагрузки:
+systemctl enable --now iptables
+7. Сохраняем текущую конфигурацию
+iptables-save > /etc/sysconfig/iptables
+a. Введите машины BR-SRV и CLI в данный домен
+1. Устанавливаем пакеты FreeIPA на BR-SRV
+cd /mnt/freeipa-client
+rpm -i --force * --nodeps
+2. Задаём BR-SRV и CLI hostname:
+hostnamectl set-hostname br-srv.demo.work
+hostnamectl set-hostname cli.demo.work
+3. Через nmtui задаём DNS-сервер
+4. Вводим в домен
+ipa-client-install --mkhomedir --enable-dns-updates
+5. Отказываемся от настройки NTP:
+Проверяем заданные параметры и соглашаемся на ввод в домен:
+Вводим учетные записи администратора
+admin:P@ssw0rd
+Успешный ввод выглядит так.
+Проверяем введенные хосты в веб-интерфейсе IPA
+Заходим на веб-интерфейс с HQ-SRV по адресу
+hq-srv.demo.work
+Имя пользователя - admin
+Пароль - P@ssw0rd
+Переходим во вкладку Узлы и проверяем:
+Настройте DNS-сервер на сервере HQ-SRV:
+a. На DNS сервере необходимо настроить 2 зоны
+Зона hq.work, также не забудьте настроить обратную зону.
+Зона branch.work
+Для создания DNS-сервера воспользуемся интегрированной
+службой DNS в FreeIPA.
+1. Для этого переходим во вкладку Сетевые службы > DNS > Зоны DNS
+2. Добавляем прямые и обратные зоны:
+Получаем следующее:
+Заходим в настройки зоны hq.work и добавляем A записи,
+одновременно создавая PTR
+Заходим в настройки зоны branch.work и добавляем A записи,
+одновременно создавая PTR
+После поднятия DNS необходимо на всех серверах указать DNS-
+сервер 192.168.100.10, по аналогии с BR-SRV:
